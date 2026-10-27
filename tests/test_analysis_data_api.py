@@ -686,3 +686,24 @@ def test_data_sources_lists_the_configured_registry(client):
     assert response.status_code == 200
     names = [source["name"] for source in response.get_json()["data"]["data_sources"]]
     assert names == ["alab_one_diffraction", "gpss_xrdml"]
+
+
+def test_pending_can_leave_out_samples_created_before_a_time(client, samples):
+    sample_id = samples("api_created_since", ALAB_ONE_DATA)
+    made = sample_id.generation_time
+    before, after = (made - timedelta(hours=1)).isoformat(), (made + timedelta(hours=1)).isoformat()
+
+    assert str(sample_id) in _pending_ids(client, limit=500, created_since=before)
+    assert str(sample_id) not in _pending_ids(client, limit=500, created_since=after)
+    naive_after = (made + timedelta(hours=1)).replace(tzinfo=None).isoformat()  # a naive time is UTC
+    assert str(sample_id) not in _pending_ids(client, limit=500, created_since=naive_after)
+    zulu_after = (made + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert str(sample_id) not in _pending_ids(client, limit=500, created_since=zulu_after)
+
+    for bad in ("yesterday", "1900-01-01"):
+        response = client.get(
+            "/api/data/analysis/pending",
+            query_string={"kind": "xrd", "data_source": "alab_one_diffraction", "params_hash": "h1",
+                          "created_since": bad},
+        )
+        assert response.status_code == 400, bad
